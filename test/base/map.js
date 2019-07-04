@@ -227,7 +227,7 @@ test("cleanup", function() {
     disposer()
     expect(aValue).toBe(2)
     expect(observable.observers.size).toBe(0)
-    expect(x._hasMap.get("a").observers.size).toBe(0)
+    expect(x._hasMap.get("a")).toBe(undefined)
 })
 
 test("strict", function() {

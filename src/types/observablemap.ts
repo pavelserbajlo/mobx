@@ -1,5 +1,6 @@
 import {
     $mobx,
+    IAtom,
     IEnhancer,
     IInterceptable,
     IInterceptor,
@@ -82,7 +83,7 @@ export class ObservableMap<K = any, V = any>
     implements Map<K, V>, IInterceptable<IMapWillChange<K, V>>, IListenable {
     [$mobx] = ObservableMapMarker
     private _data: Map<K, ObservableValue<V>>
-    private _hasMap: Map<K, ObservableValue<boolean>> // hasMap, not hashMap >-).
+    private _hasMap: Map<K, IAtom> // hasMap, not hashMap >-).
     private _keysAtom = createAtom(`${this.name}.keys()`)
     interceptors
     changeListeners
@@ -108,8 +109,15 @@ export class ObservableMap<K = any, V = any>
     }
 
     has(key: K): boolean {
-        if (this._hasMap.has(key)) return this._hasMap.get(key)!.get()
-        return this._updateHasMapEntry(key, false).get()
+        const atom =
+            this._hasMap.get(key) ||
+            createAtom(
+                `${this.name}.${stringifyKey(key)}?`,
+                () => this._hasMap.set(key, atom), // safe because this will happens once 3 lines below
+                () => this._hasMap.delete(key)
+            )
+        atom.reportObserved()
+        return this._has(key)
     }
 
     set(key: K, value: V) {
@@ -158,7 +166,7 @@ export class ObservableMap<K = any, V = any>
                 spyReportStart({ ...change, name: this.name, key })
             transaction(() => {
                 this._keysAtom.reportChanged()
-                this._updateHasMapEntry(key, false)
+                this._updateHasMapEntry(key)
                 const observable = this._data.get(key)!
                 observable.setNewValue(undefined as any)
                 this._data.delete(key)
@@ -170,21 +178,11 @@ export class ObservableMap<K = any, V = any>
         return false
     }
 
-    private _updateHasMapEntry(key: K, value: boolean): ObservableValue<boolean> {
-        // optimization; don't fill the hasMap if we are not observing, or remove entry if there are no observers anymore
+    private _updateHasMapEntry(key: K) {
         let entry = this._hasMap.get(key)
         if (entry) {
-            entry.setNewValue(value)
-        } else {
-            entry = new ObservableValue(
-                value,
-                referenceEnhancer,
-                `${this.name}.${stringifyKey(key)}?`,
-                false
-            )
-            this._hasMap.set(key, entry)
+            entry.reportChanged()
         }
-        return entry
     }
 
     private _updateValue(key: K, newValue: V | undefined) {
@@ -222,7 +220,7 @@ export class ObservableMap<K = any, V = any>
             )
             this._data.set(key, observable)
             newValue = (observable as any).value // value might have been changed
-            this._updateHasMapEntry(key, true)
+            this._updateHasMapEntry(key)
             this._keysAtom.reportChanged()
         })
         const notifySpy = isSpyEnabled()
